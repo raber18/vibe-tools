@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>經典賭場拉霸機</title>
+    <!-- 引入 Tailwind CSS 進行快速排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 canvas-confetti 製作彩帶噴發特效 -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- 引入像素風字體與無襯線字體 -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --neon-red: #ff0055;
+            --neon-gold: #ffd700;
+            --symbol-size: 130px;
+        }
+
+        body {
+            background-color: #1a0b10;
+            background-image: radial-gradient(circle at center, #3a1020 0%, #11050a 100%);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            touch-action: manipulation;
+        }
+
+        .pixel-font {
+            font-family: 'Press Start 2P', cursive;
+        }
+
+        /* 隱藏數字輸入框的上下箭頭 */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; 
+            margin: 0; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+
+        .neon-border {
+            border: 6px solid var(--neon-red);
+            border-radius: 1rem;
+            box-shadow: 0 0 10px var(--neon-red),
+                        0 0 20px var(--neon-red) inset,
+                        0 0 30px rgba(255, 0, 85, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .neon-border.win-flash {
+            animation: neon-blink 0.5s infinite alternate;
+            border-color: var(--neon-gold);
+            box-shadow: 0 0 20px var(--neon-gold),
+                        0 0 40px var(--neon-gold) inset,
+                        0 0 60px rgba(255, 215, 0, 0.8);
+        }
+
+        @keyframes neon-blink {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; text-shadow: 0 0 20px #fff; }
+        }
+
+        /* 轉輪主框架：移除紅線與黑線，改用上下遮罩突顯中間判定區 */
+        .slot-window {
+            height: calc(var(--symbol-size) * 3);
+            background: #f3f4f6;
+            border: 12px solid #2d3748; /* 粗框架 */
+            border-radius: 0.75rem;
+            box-shadow: inset 0 10px 30px rgba(0,0,0,0.6), 0 10px 20px rgba(0,0,0,0.5);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+        }
+
+        /* 上下遮罩，營造立體感並自然劃分出中間中獎區 */
+        .slot-window::before, .slot-window::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0;
+            height: calc(var(--symbol-size) * 0.85);
+            background: rgba(0, 0, 0, 0.35);
+            z-index: 10;
+            pointer-events: none;
+        }
+        .slot-window::before { top: 0; border-bottom: 2px solid rgba(0,0,0,0.2); }
+        .slot-window::after { bottom: 0; border-top: 2px solid rgba(0,0,0,0.2); }
+
+        .reel-container {
+            flex: 1; /* 均分三個轉輪的寬度 */
+            height: 100%;
+            position: relative;
+            /* 移除 border-right 黑線 */
+        }
+
+        .strip {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            will-change: transform;
+        }
+
+        .symbol {
+            height: var(--symbol-size);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4.5rem;
+            filter: drop-shadow(0 5px 5px rgba(0,0,0,0.3));
+        }
+
+        .spinning .symbol {
+            filter: blur(2px) drop-shadow(0 5px 5px rgba(0,0,0,0.3));
+        }
+
+        .symbol-win {
+            animation: symbol-bounce 0.8s ease infinite alternate;
+            z-index: 20;
+            position: relative;
+        }
+
+        @keyframes symbol-bounce {
+            0% { transform: scale(1); }
+            100% { transform: scale(1.2); }
+        }
+
+        /* 按鈕視覺 */
+        .btn-game {
+            transition: all 0.1s active;
+            box-shadow: 0 6px 0px #333;
+        }
+        .btn-game:active:not(:disabled) {
+            transform: translateY(6px);
+            box-shadow: 0 0px 0px #333;
+        }
+        .btn-game:disabled {
+            filter: grayscale(100%);
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: translateY(6px);
+            box-shadow: 0 0px 0px #333;
+        }
+        
+        .btn-spin {
+            background: linear-gradient(180deg, #ff4d4d 0%, #cc0000 100%);
+            box-shadow: 0 8px 0px #7a0000;
+        }
+        .btn-spin:active:not(:disabled) {
+            transform: translateY(8px);
+            box-shadow: 0 0px 0px #7a0000;
+        }
+
+        .paytable {
+            background: rgba(0,0,0,0.6);
+            border: 2px solid #555;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 select-none">
+
+    <div id="machine" class="neon-border bg-gray-900 w-full max-w-4xl p-6 flex flex-col gap-6 relative">
+        
+        <!-- 頂部：賠率表 -->
+        <div class="paytable p-4 flex flex-wrap justify-between items-center text-sm md:text-base text-yellow-300 font-bold">
+            <div class="w-full text-center mb-2 text-white pixel-font text-xs">PAYTABLE (MULTIPLIER)</div>
+            <div class="flex items-center gap-2"><span>7️⃣7️⃣7️⃣</span><span class="text-white">x50</span></div>
+            <div class="flex items-center gap-2"><span>🎰🎰🎰</span><span class="text-white">x20</span></div>
+            <div class="flex items-center gap-2"><span>💎💎💎</span><span class="text-white">x10</span></div>
+            <div class="flex items-center gap-2"><span>🍒🍒🍒</span><span class="text-white">x5</span></div>
+            <div class="flex items-center gap-2"><span>OTHER MATCHES</span><span class="text-white">x2</span></div>
+        </div>
+
+        <!-- 中央主體：3個轉輪 (已無紅線與黑線) -->
+        <div class="slot-window w-full mx-auto max-w-2xl">
+            <!-- 轉輪1 -->
+            <div class="reel-container"><div id="reel-0" class="strip"></div></div>
+            <!-- 轉輪2 -->
+            <div class="reel-container"><div id="reel-1" class="strip"></div></div>
+            <!-- 轉輪3 -->
+            <div class="reel-container"><div id="reel-2" class="strip"></div></div>
+        </div>
+
+        <!-- 底部控制區 -->
+        <div class="flex flex-col md:flex-row gap-4 items-center justify-between mt-4">
+            
+            <!-- 分數顯示 -->
+            <div class="bg-black border-4 border-gray-600 rounded p-4 flex-1 w-full text-center flex flex-col justify-center">
+                <div class="text-gray-400 text-xs mb-1 pixel-font">CREDIT</div>
+                <div id="credit-display" class="text-green-500 text-3xl font-bold pixel-font">1000</div>
+            </div>
+            
+            <!-- 自訂下注輸入框 -->
+            <div class="bg-black border-4 border-gray-600 rounded p-4 flex-1 w-full text-center flex flex-col justify-center">
+                <label for="input-bet" class="text-gray-400 text-xs mb-1 pixel-font cursor-pointer">BET (CUSTOM)</label>
+                <input type="number" id="input-bet" value="10" min="1" class="bg-transparent text-yellow-400 text-3xl font-bold pixel-font text-center w-full outline-none" onchange="handleBetInput()" onkeyup="handleBetInput()">
+            </div>
+
+            <!-- 下注按鈕 -->
+            <div class="flex gap-2 flex-1 w-full justify-center">
+                <button id="btn-bet-100" class="btn-game bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded pixel-font text-xs flex-1" onclick="addBet(100)">BET 100</button>
+                <button id="btn-bet-max" class="btn-game bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-4 rounded pixel-font text-xs flex-1" onclick="setBetMax()">BET MAX</button>
+            </div>
+
+            <!-- SPIN 按鈕 -->
+            <button id="btn-spin" class="btn-spin text-white font-bold py-6 px-10 rounded-full pixel-font text-2xl ml-auto mr-auto md:ml-4 w-full md:w-auto" onclick="spin()">SPIN</button>
+        </div>
+        
+        <!-- 狀態訊息 -->
+        <div id="status-message" class="text-center text-xl text-yellow-300 font-bold pixel-font h-6 mt-2">
+            WELCOME TO CASINO
+        </div>
+    </div>
+
+    <!-- 破產提示畫面 -->
+    <div id="game-over-modal" class="fixed inset-0 bg-black bg-opacity-90 z-50 hidden flex-col items-center justify-center p-4">
+        <h1 class="text-red-500 text-6xl md:text-8xl font-bold pixel-font mb-8 text-center drop-shadow-[0_0_20px_red]">GAME OVER</h1>
+        <p class="text-white text-xl mb-12 pixel-font">Not enough credits to continue!</p>
+        <button onclick="resetGame()" class="btn-game bg-green-500 hover:bg-green-400 text-white font-bold py-4 px-8 rounded pixel-font text-xl">RESTART (Add Credits)</button>
+    </div>
+
+    <script>
+        // 符號與賠率倍數定義
+        const SYMBOLS = ['7️⃣', '🎰', '💎', '🍒', '🍋', '🔔'];
+        const MULTIPLIERS = {
+            '7️⃣': 50,
+            '🎰': 20,
+            '💎': 10,
+            '🍒': 5,
+            '🍋': 2,
+            '🔔': 2
+        };
+        const SYMBOL_HEIGHT = 130; // 須與 CSS 中 var(--symbol-size) 一致
+        const REEL_STRIP_LENGTH = 40; // 每次滾動生成的虛擬轉輪長度
+
+        // 遊戲狀態
+        let credits = 1000;
+        let isSpinning = false;
+        
+        // DOM 元素
+        const elCredit = document.getElementById('credit-display');
+        const elInputBet = document.getElementById('input-bet');
+        const elBtnSpin = document.getElementById('btn-spin');
+        const elBtnBet100 = document.getElementById('btn-bet-100');
+        const elBtnBetMax = document.getElementById('btn-bet-max');
+        const elMachine = document.getElementById('machine');
+        const elStatus = document.getElementById('status-message');
+        const elGameOver = document.getElementById('game-over-modal');
+
+        // 音效系統
+        let audioCtx;
+        
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'spin') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(50, now);
+                osc.frequency.linearRampToValueAtTime(70, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } else if (type === 'clack') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+                gainNode.gain.setValueAtTime(0.8, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'win') {
+                osc.type = 'sine';
+                const freqs = [440, 554, 659, 880, 1108]; 
+                freqs.forEach((freq, i) => {
+                    osc.frequency.setValueAtTime(freq, now + i * 0.1);
+                });
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.5, now + 0.1);
+                gainNode.gain.setValueAtTime(0.5, now + 0.4);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                osc.start(now);
+                osc.stop(now + 0.6);
+            }
+        }
+
+        function getValidatedBet() {
+            let bet = parseInt(elInputBet.value);
+            if (isNaN(bet) || bet <= 0) bet = 1;
+            if (bet > credits) bet = credits; // 無法超過目前餘額
+            return bet;
+        }
+
+        function handleBetInput() {
+            let bet = getValidatedBet();
+            // 不要在輸入當下強制覆蓋 value，以免打字體驗不佳，只在需要時校正
+            updateButtonStates(bet);
+        }
+
+        function setBet(amount) {
+            initAudio();
+            playSound('clack');
+            
+            let finalBet = amount;
+            if (finalBet > credits) finalBet = credits; // 防止設定超過餘額
+            
+            elInputBet.value = finalBet;
+            updateButtonStates(finalBet);
+            elStatus.innerText = `BET SET TO ${finalBet}`;
+        }
+
+        function setBetMax() {
+            setBet(credits);
+        }
+
+        function addBet(amount) {
+            initAudio();
+            playSound('clack');
+            
+            let currentBet = getValidatedBet();
+            let finalBet = currentBet + amount;
+            if (finalBet > credits) finalBet = credits; // 防止設定超過餘額
+            
+            elInputBet.value = finalBet;
+            updateButtonStates(finalBet);
+            elStatus.innerText = `BET SET TO ${finalBet}`;
+        }
+
+        function updateButtonStates(currentBetVal) {
+            if (isSpinning) {
+                elInputBet.disabled = true;
+                elBtnBet100.disabled = true;
+                elBtnBetMax.disabled = true;
+                elBtnSpin.disabled = true;
+            } else {
+                elInputBet.disabled = false;
+                elBtnBet100.disabled = credits <= 0;
+                elBtnBetMax.disabled = credits <= 0;
+                
+                // Spin按鈕：餘額需大於0，且下注額必須小於等於餘額
+                const bet = currentBetVal !== undefined ? currentBetVal : getValidatedBet();
+                elBtnSpin.disabled = credits <= 0 || bet <= 0 || bet > credits;
+            }
+        }
+
+        function countUpCredit(targetCredit) {
+            const startCredit = parseInt(elCredit.innerText);
+            const diff = targetCredit - startCredit;
+            const duration = 1500;
+            const startTime = performance.now();
+
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const easeOut = 1 - Math.pow(1 - progress, 3);
+                
+                elCredit.innerText = Math.floor(startCredit + diff * easeOut);
+
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    elCredit.innerText = targetCredit;
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        function getRandomSymbol() {
+            return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
+        }
+
+        function initReels() {
+            for (let i = 0; i < 3; i++) {
+                const strip = document.getElementById(`reel-${i}`);
+                strip.innerHTML = '';
+                for(let j=0; j<3; j++) {
+                    strip.innerHTML += `<div class="symbol">${getRandomSymbol()}</div>`;
+                }
+                strip.style.transform = `translateY(0px)`;
+                strip.style.transition = 'none';
+            }
+        }
+
+        function generateStrip(targetSymbol, reelElement) {
+            reelElement.innerHTML = '';
+            reelElement.classList.add('spinning');
+            
+            const targetIndex = REEL_STRIP_LENGTH - 2; 
+
+            for (let i = 0; i < REEL_STRIP_LENGTH; i++) {
+                const symDiv = document.createElement('div');
+                symDiv.className = 'symbol';
+                
+                if (i === targetIndex) {
+                    symDiv.innerText = targetSymbol;
+                    symDiv.id = `target-${reelElement.id}`; 
+                } else {
+                    symDiv.innerText = getRandomSymbol();
+                }
+                reelElement.appendChild(symDiv);
+            }
+            
+            reelElement.style.transition = 'none';
+            reelElement.style.transform = `translateY(0px)`;
+            reelElement.offsetHeight; 
+        }
+
+        function spinReel(reelIndex, targetSymbol, duration) {
+            return new Promise((resolve) => {
+                const strip = document.getElementById(`reel-${reelIndex}`);
+                generateStrip(targetSymbol, strip);
+
+                const targetTranslateY = -((REEL_STRIP_LENGTH - 2) * SYMBOL_HEIGHT - SYMBOL_HEIGHT);
+
+                strip.style.transition = `transform ${duration}s cubic-bezier(0.1, 0.7, 0.1, 1.1)`;
+                strip.style.transform = `translateY(${targetTranslateY}px)`;
+
+                const spinSoundInterval = setInterval(() => {
+                    playSound('spin');
+                }, 150);
+
+                setTimeout(() => {
+                    clearInterval(spinSoundInterval);
+                    strip.classList.remove('spinning');
+                    playSound('clack');
+                    resolve();
+                }, duration * 1000);
+            });
+        }
+
+        async function spin() {
+            // 每次拉霸前強制進行輸入框驗證
+            let finalBet = getValidatedBet();
+            elInputBet.value = finalBet;
+
+            if (isSpinning || credits < finalBet || finalBet <= 0) return;
+            initAudio();
+
+            // 扣除下注金額
+            isSpinning = true;
+            credits -= finalBet;
+            elCredit.innerText = credits;
+            updateButtonStates(finalBet);
+            
+            // 重置特效
+            elMachine.classList.remove('win-flash');
+            elStatus.innerText = 'SPINNING...';
+            elStatus.classList.remove('text-green-400');
+            elStatus.classList.add('text-yellow-300');
+            document.querySelectorAll('.symbol-win').forEach(el => el.classList.remove('symbol-win'));
+
+            const results = [getRandomSymbol(), getRandomSymbol(), getRandomSymbol()];
+
+            // 啟動 3 個轉輪的動畫
+            const p1 = spinReel(0, results[0], 1.5);
+            const p2 = spinReel(1, results[1], 2.5);
+            const p3 = spinReel(2, results[2], 3.5);
+
+            await Promise.all([p1, p2, p3]);
+
+            checkWin(results, finalBet);
+        }
+
+        function checkWin(results, betAmount) {
+            const isWin = results[0] === results[1] && results[1] === results[2];
+            
+            if (isWin) {
+                const symbol = results[0];
+                const multiplier = MULTIPLIERS[symbol] || 2;
+                const totalWin = betAmount * multiplier;
+
+                credits += totalWin;
+                
+                countUpCredit(credits);
+                
+                elStatus.innerText = `WIN ${totalWin} CREDITS!`;
+                elStatus.classList.remove('text-yellow-300');
+                elStatus.classList.add('text-green-400');
+
+                playSound('win');
+                
+                if (symbol === '7️⃣' || symbol === '🎰') {
+                    elMachine.classList.add('win-flash');
+                    triggerConfetti();
+                }
+
+                for(let i=0; i<3; i++) {
+                    const targetEl = document.getElementById(`target-reel-${i}`);
+                    if(targetEl) targetEl.classList.add('symbol-win');
+                }
+                
+                setTimeout(triggerConfetti, 300);
+                setTimeout(triggerConfetti, 600);
+
+            } else {
+                elStatus.innerText = 'TRY AGAIN';
+            }
+
+            isSpinning = false;
+            
+            // 若剩餘金額低於目前輸入框的下注額，自動下修輸入框數值
+            if (credits > 0 && credits < getValidatedBet()) {
+                elInputBet.value = credits;
+            }
+            
+            updateButtonStates();
+            checkGameOver();
+        }
+
+        function triggerConfetti() {
+            const duration = 2000;
+            const end = Date.now() + duration;
+
+            (function frame() {
+                confetti({
+                    particleCount: 5,
+                    angle: 60,
+                    spread: 55,
+                    origin: { x: 0, y: 0.8 },
+                    colors: ['#ffd700', '#ffae42']
+                });
+                confetti({
+                    particleCount: 5,
+                    angle: 120,
+                    spread: 55,
+                    origin: { x: 1, y: 0.8 },
+                    colors: ['#ffd700', '#ffae42']
+                });
+
+                if (Date.now() < end) {
+                    requestAnimationFrame(frame);
+                }
+            }());
+        }
+
+        function checkGameOver() {
+            if (credits <= 0) {
+                setTimeout(() => {
+                    elGameOver.classList.remove('hidden');
+                    elGameOver.classList.add('flex');
+                }, 1000);
+            }
+        }
+
+        function resetGame() {
+            credits = 1000;
+            elInputBet.value = 10;
+            elCredit.innerText = credits;
+            updateButtonStates();
+            elGameOver.classList.add('hidden');
+            elGameOver.classList.remove('flex');
+            elStatus.innerText = 'WELCOME TO CASINO';
+            elMachine.classList.remove('win-flash');
+            initReels();
+        }
+
+        // 初始設定
+        initReels();
+        updateButtonStates();
+
+    </script>
+</body>
+</html>
